@@ -73,9 +73,6 @@ class GitDiffExportApp(QtWidgets.QMainWindow, Ui_Git_code_change.Ui_GitDiffExpor
         self.setupUi(self)
         self.setup_control()
         self.load_config()
-        self.form_layout = QFormLayout(self.centralwidget)
-        self.setCentralWidget(self.centralwidget)
-        self.form_layout.setFormAlignment(QtCore.Qt.AlignLeft)
         self.sha1_inputs = [self.SHA1_input]
 
     def setup_control(self):
@@ -90,22 +87,9 @@ class GitDiffExportApp(QtWidgets.QMainWindow, Ui_Git_code_change.Ui_GitDiffExpor
         repo_path = QFileDialog.getExistingDirectory(self, "Select Git Repository", "", options=options)
         self.repo_path_input.setPlainText(repo_path)
 
-    def change_num_sha1(self, index):
-        num_sha1 = index + 1
-
-        while len(self.sha1_inputs) < num_sha1:
-            new_sha1_input = QLineEdit()
-            self.sha1_inputs.append(new_sha1_input)
-            self.form_layout.insertRow(len(self.sha1_inputs) + 3, new_sha1_input)
-
-        while len(self.sha1_inputs) > num_sha1:
-            sha1_input = self.sha1_inputs.pop()
-            self.form_layout.removeWidget(sha1_input)
-            sha1_input.deleteLater()
-
     def start(self):
-        repo_path = self.repo_path_input.text()
-        sha1_list = [sha1_input.text() for sha1_input in self.sha1_inputs]
+        repo_path = self.repo_path_input.toPlainText()
+        sha1_list = [sha1_input.toPlainText() for sha1_input in self.sha1_inputs]
         # Check if all sha1s are valid
         for sha1 in sha1_list:
             if not is_valid_sha1(sha1):
@@ -124,14 +108,35 @@ class GitDiffExportApp(QtWidgets.QMainWindow, Ui_Git_code_change.Ui_GitDiffExpor
         # Show the completed dialog
         QMessageBox.information(self, "Operation Completed", "The operation has been completed successfully.", QMessageBox.Ok)
 
+    def change_num_sha1(self, index):
+        # Calculate the number of SHA1_inputs needed according to the selection of the drop-down menu
+        num_sha1 = index + 1
+        # If more SHA1_inputs are needed, create new input boxes, set their positions and display them
+        while len(self.sha1_inputs) < num_sha1:
+            new_input = QtWidgets.QPlainTextEdit(self.centralwidget)
+            new_input.setGeometry(self.sha1_inputs[-1].geometry().x(), self.sha1_inputs[-1].geometry().y() + 40, 410, 31)
+            new_input.setObjectName("SHA1_input")
+            new_input.show()
+            self.sha1_inputs.append(new_input)
+        # If less SHA1_input is needed, hide and delete the extra input box
+        while len(self.sha1_inputs) > num_sha1:
+            self.sha1_inputs[-1].hide()
+            del self.sha1_inputs[-1]
+        # Move the "Start" button below the last SHA1_input and adjust the window size
+        last_sha1_input_y = self.sha1_inputs[-1].geometry().y()
+        self.pushButton_start.setGeometry(10, last_sha1_input_y + 40, 411, 31)
+        # Adjust the window size according to the position of the "Start" button
+        self.resize(self.width(), self.pushButton_start.geometry().y() + 75)
+
     def closeEvent(self, event):
         self.save_config()
         event.accept()
 
     def save_config(self):
-        config = {"last_repo_path": self.repo_path_input.text()}
-        with open("config.json", "w") as f:
-            json.dump(config, f)
+        if self.repo_path_input.toPlainText() != "":
+            config = {"last_repo_path": self.repo_path_input.toPlainText()}
+            with open("config.json", "w") as f:
+                json.dump(config, f)
 
     def load_config(self):
         if os.path.exists("config.json"):
