@@ -1,46 +1,29 @@
 import sys
-from PyQt5.QtWidgets import QApplication, QWidget, QVBoxLayout, QHBoxLayout, QComboBox, QLineEdit, QLabel
+from PyQt5.QtWidgets import QApplication  ,QWidget ,QHBoxLayout , QPushButton
 
-class MainWindow(QWidget):
-    def __init__(self):
-        super().__init__()
+class Winform(QWidget):
+	def __init__(self,parent=None):
+		super(Winform,self).__init__(parent)
+		self.setWindowTitle("水平布局管理例子")
+		self.resize(800, 50)
 
-        self.layout = QVBoxLayout()
+		# 水平布局按照从左到右的顺序进行添加按钮部件。
+		hlayout = QHBoxLayout()
+        # 添加伸缩
+		hlayout.addStretch(0)
 
-        self.top_layout = QHBoxLayout()
-        self.label = QLabel("選擇輸入框數量:")
-        self.top_layout.addWidget(self.label)
+		hlayout.addWidget( QPushButton(str(1)) )
+		hlayout.addWidget( QPushButton(str(2)) )
+		hlayout.addWidget( QPushButton(str(3)))
+		hlayout.addWidget( QPushButton(str(4)) )
+		hlayout.addWidget( QPushButton(str(5)) )
+        # 添加伸缩
+		#hlayout.addStretch(1)
 
-        self.combo_box = QComboBox()
-        for i in range(1, 11):
-            self.combo_box.addItem(str(i))
-        self.top_layout.addWidget(self.combo_box)
-        self.layout.addLayout(self.top_layout)
+		self.setLayout(hlayout)
 
-        self.input_layout = QVBoxLayout()
-        self.line_edits = []
-        self.update_input_boxes(1)
-        self.layout.addLayout(self.input_layout)
-
-        self.combo_box.currentIndexChanged.connect(self.on_combobox_changed)
-        self.setLayout(self.layout)
-
-    def on_combobox_changed(self, index):
-        num_boxes = index + 1
-        self.update_input_boxes(num_boxes)
-
-    def update_input_boxes(self, num_boxes):
-        for line_edit in self.line_edits:
-            self.input_layout.removeWidget(line_edit)
-            line_edit.deleteLater()
-
-        self.line_edits = [QLineEdit() for _ in range(num_boxes)]
-        for line_edit in self.line_edits:
-            self.input_layout.addWidget(line_edit)
-        self.adjustSize()  # 在此處添加調整大小的方法
-
-if __name__ == '__main__':
-    app = QApplication(sys.argv)
-    main_window = MainWindow()
-    main_window.show()
-    sys.exit(app.exec_())
+if __name__ == "__main__":
+	app = QApplication(sys.argv)
+	form = Winform()
+	form.show()
+	sys.exit(app.exec_())
