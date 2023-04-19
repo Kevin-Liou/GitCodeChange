@@ -1,7 +1,7 @@
 import git, os, re, shutil
 from datetime import datetime
 
-def export_diff_files(repo_path, sha1):
+def export_diff_files(repo_path, sha1, output_path):
     # Initialize Git repository and commit objects
     repo = git.Repo(repo_path)
     assert not repo.bare
@@ -17,8 +17,8 @@ def export_diff_files(repo_path, sha1):
     deleted_files = list(diff.iter_change_type("D"))
 
     # Create directories to store modified and original files
-    mod_dir = os.path.join(sha1, "mod")
-    org_dir = os.path.join(sha1, "org")
+    mod_dir = os.path.join(output_path, sha1, "mod")
+    org_dir = os.path.join(output_path, sha1, "org")
     os.makedirs(mod_dir, exist_ok=True)
     os.makedirs(org_dir, exist_ok=True)
 
@@ -62,14 +62,14 @@ def export_diff_files(repo_path, sha1):
             f.write(old_blob.data_stream.read())
 
     # Create note.txt file and write the file lists
-    write_note_file(sha1, changed_files, added_files, deleted_files)
+    write_note_file(os.path.join(output_path, sha1), changed_files, added_files, deleted_files)
 
-def export_uncommitted_changes(repo_path):
+def export_uncommitted_changes(repo_path, output_path):
     # Initialize Git repository
     repo = git.Repo(repo_path)
     assert not repo.bare
 
-    current_path = os.getcwd()
+    current_path = output_path
     timestamp = datetime.now().strftime("%Y%m%d%H%M")
 
     # Create directories for modified and original files
@@ -149,7 +149,7 @@ def export_uncommitted_changes(repo_path):
             f.write(old_blob.data_stream.read())
 
     # Create note.txt file and write the file lists
-    write_note_file(os.path.join(current_path, timestamp), changed_files, added_files, deleted_files)
+    write_note_file(os.path.join(output_path, timestamp), changed_files, added_files, deleted_files)
 
 # Check if a given string is a valid SHA-1 hash
 def is_valid_sha1(sha1):
