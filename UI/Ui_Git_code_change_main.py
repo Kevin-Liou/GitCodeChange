@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 
-# Form implementation generated from reading ui file 'd:\Code\LocalProjects\GitCodeChange\UI\Git_code_change_main.ui'
+# Form implementation generated from reading ui file 'd:\test\GitCodeChange\UI\Git_code_change_main.ui'
 #
 # Created by: PyQt5 UI code generator 5.15.9
 #
@@ -145,19 +145,19 @@ class Ui_GitDiffExportUI(object):
         self.horizontalLayout_3.setObjectName("horizontalLayout_3")
         spacerItem = QtWidgets.QSpacerItem(40, 20, QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Minimum)
         self.horizontalLayout_3.addItem(spacerItem)
-        self.pushButton_start = QtWidgets.QPushButton(self.widget)
+        self.pushButton_build = QtWidgets.QPushButton(self.widget)
         sizePolicy = QtWidgets.QSizePolicy(QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Expanding)
         sizePolicy.setHorizontalStretch(0)
         sizePolicy.setVerticalStretch(0)
-        sizePolicy.setHeightForWidth(self.pushButton_start.sizePolicy().hasHeightForWidth())
-        self.pushButton_start.setSizePolicy(sizePolicy)
-        self.pushButton_start.setMaximumSize(QtCore.QSize(100, 16777215))
+        sizePolicy.setHeightForWidth(self.pushButton_build.sizePolicy().hasHeightForWidth())
+        self.pushButton_build.setSizePolicy(sizePolicy)
+        self.pushButton_build.setMaximumSize(QtCore.QSize(100, 16777215))
         font = QtGui.QFont()
         font.setFamily("Arial")
         font.setPointSize(12)
-        self.pushButton_start.setFont(font)
-        self.pushButton_start.setObjectName("pushButton_start")
-        self.horizontalLayout_3.addWidget(self.pushButton_start)
+        self.pushButton_build.setFont(font)
+        self.pushButton_build.setObjectName("pushButton_build")
+        self.horizontalLayout_3.addWidget(self.pushButton_build)
         self.verticalLayout.addLayout(self.horizontalLayout_3)
         GitDiffExportUI.setCentralWidget(self.centralwidget)
         self.menubar = QtWidgets.QMenuBar(GitDiffExportUI)
@@ -196,7 +196,7 @@ class Ui_GitDiffExportUI(object):
         self.SHA1_group.setItemText(4, _translate("GitDiffExportUI", "5"))
         self.label_output_path.setText(_translate("GitDiffExportUI", "Output Path:"))
         self.pushButton_output_browse.setText(_translate("GitDiffExportUI", "..."))
-        self.pushButton_start.setText(_translate("GitDiffExportUI", "Build"))
+        self.pushButton_build.setText(_translate("GitDiffExportUI", "Build"))
         self.menuHelp.setTitle(_translate("GitDiffExportUI", "Help"))
         self.menuSetting.setTitle(_translate("GitDiffExportUI", "preferences"))
         self.actionHow_to_use.setText(_translate("GitDiffExportUI", "How to use"))

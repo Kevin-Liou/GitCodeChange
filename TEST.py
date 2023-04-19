@@ -1,29 +1,21 @@
-import sys
-from PyQt5.QtWidgets import QApplication  ,QWidget ,QHBoxLayout , QPushButton
+from PyQt5.QtWidgets import QWidget, QTableWidget, QTableWidgetItem, QVBoxLayout
 
-class Winform(QWidget):
-	def __init__(self,parent=None):
-		super(Winform,self).__init__(parent)
-		self.setWindowTitle("水平布局管理例子")
-		self.resize(800, 50)
+class select_files_windows(QWidget):
+    def __init__(self):
+        super().__init__()
+        self.initUI()
 
-		# 水平布局按照从左到右的顺序进行添加按钮部件。
-		hlayout = QHBoxLayout()
-        # 添加伸缩
-		hlayout.addStretch(0)
+    def initUI(self):
+        # 創建tableWidget物件
+        self.tableWidget = QTableWidget()
+        self.tableWidget.setRowCount(10)
+        self.tableWidget.setColumnCount(5)
+        self.tableWidget.setHorizontalHeaderLabels(['Column 1', 'Column 2', 'Column 3', 'Column 4', 'Column 5'])
 
-		hlayout.addWidget( QPushButton(str(1)) )
-		hlayout.addWidget( QPushButton(str(2)) )
-		hlayout.addWidget( QPushButton(str(3)))
-		hlayout.addWidget( QPushButton(str(4)) )
-		hlayout.addWidget( QPushButton(str(5)) )
-        # 添加伸缩
-		#hlayout.addStretch(1)
+        # 設定表格列寬自適應
+        self.tableWidget.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
 
-		self.setLayout(hlayout)
-
-if __name__ == "__main__":
-	app = QApplication(sys.argv)
-	form = Winform()
-	form.show()
-	sys.exit(app.exec_())
+        # 將tableWidget物件添加到垂直佈局中
+        layout = QVBoxLayout()
+        layout.addWidget(self.tableWidget)
+        self.setLayout(layout)

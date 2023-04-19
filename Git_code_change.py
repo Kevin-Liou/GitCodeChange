@@ -1,6 +1,6 @@
 import os, sys, json, threading, UI, Git_lib
 from PyQt5 import QtWidgets
-from PyQt5.QtWidgets import QApplication, QMessageBox, QFileDialog
+from PyQt5.QtWidgets import QApplication, QMessageBox, QFileDialog, QHeaderView, QAbstractItemView
 
 
 class how_to_use_windows(QtWidgets.QDialog, UI.Ui_Git_code_change_how_to_use.Ui_Howtoused):
@@ -12,6 +12,16 @@ class setting_windows(QtWidgets.QDialog, UI.Ui_Git_code_change_setting.Ui_Settin
     def __init__(self):
         super().__init__()
         self.setupUi(self)
+
+class select_files_windows(QtWidgets.QDialog, UI.Ui_Git_code_change_select_files.Ui_Selectfiles):
+    def __init__(self):
+        super().__init__()
+        self.setupUi(self)
+        self.tableWidget_files_list.horizontalHeader().resizeSection(0, 550) # Set column width
+        self.tableWidget_files_list.horizontalHeader().resizeSection(1, 88) # Set column width
+        #self.tableWidget_files_list.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch) # Column width auto-sizing feature
+        self.tableWidget_files_list.setEditTriggers(QAbstractItemView.NoEditTriggers) # Disable editing
+        self.tableWidget_files_list.verticalHeader().setVisible(False) # Hide rows
 
 class main_windows(QtWidgets.QMainWindow, UI.Ui_Git_code_change_main.Ui_GitDiffExportUI):
     def __init__(self):
@@ -25,7 +35,7 @@ class main_windows(QtWidgets.QMainWindow, UI.Ui_Git_code_change_main.Ui_GitDiffE
     def setup_control(self):
         self.pushButton_repo_browse.clicked.connect(self.repo_browse)
         self.pushButton_output_browse.clicked.connect(self.output_browse)
-        self.pushButton_start.clicked.connect(self.start)
+        self.pushButton_build.clicked.connect(self.open_select_files_windows) # test
         self.SHA1_group.currentIndexChanged.connect(self.change_num_sha1)
         self.actionHow_to_use.triggered.connect(self.open_how_to_use_windows)
         self.actionSetting.triggered.connect(self.open_setting_windows)
@@ -126,6 +136,11 @@ class main_windows(QtWidgets.QMainWindow, UI.Ui_Git_code_change_main.Ui_GitDiffE
     def open_setting_windows(self):
         self.setting_win = setting_windows()
         self.setting_win.show()
+
+    # Open the "Select files" window.
+    def open_select_files_windows(self):
+        self.select_files_win = select_files_windows()
+        self.select_files_win.show()
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)
