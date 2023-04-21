@@ -1,6 +1,6 @@
 import os, sys, json, threading, UI, Git_lib
-from PyQt5 import QtWidgets
-from PyQt5.QtWidgets import QApplication, QMessageBox, QFileDialog, QHeaderView, QAbstractItemView
+from PyQt5 import QtWidgets, QtCore
+from PyQt5.QtWidgets import QApplication, QMessageBox, QFileDialog, QAbstractItemView, QTableWidgetItem, QCheckBox, QWidget, QHBoxLayout
 
 
 class how_to_use_windows(QtWidgets.QDialog, UI.Ui_Git_code_change_how_to_use.Ui_Howtoused):
@@ -17,11 +17,69 @@ class select_files_windows(QtWidgets.QDialog, UI.Ui_Git_code_change_select_files
     def __init__(self):
         super().__init__()
         self.setupUi(self)
-        self.tableWidget_files_list.horizontalHeader().resizeSection(0, 550) # Set column width
-        self.tableWidget_files_list.horizontalHeader().resizeSection(1, 88) # Set column width
-        #self.tableWidget_files_list.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch) # Column width auto-sizing feature
+        self.setup_control()
+        self.initUi()
+
+    # Set up signal connections for UI elements.
+    def setup_control(self):
+        # self.pushButton_repo_browse.clicked.connect(self.repo_browse)
+        pass
+
+    def initUi(self):
+        self.tableWidget_files_list.horizontalHeader().resizeSection(0, 15) # Set column width
+        self.tableWidget_files_list.horizontalHeader().resizeSection(1, 546) # Set column width
+        self.tableWidget_files_list.horizontalHeader().resizeSection(2, 52) # Set column width
+        # self.tableWidget_files_list.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch) # Column width auto-sizing feature
         self.tableWidget_files_list.setEditTriggers(QAbstractItemView.NoEditTriggers) # Disable editing
+        self.tableWidget_files_list.setSelectionMode(QAbstractItemView.NoSelection) # Set the table to NoSelection mode
         self.tableWidget_files_list.verticalHeader().setVisible(False) # Hide rows
+        self.tableWidget_files_list.setShowGrid(False) # Hide Grid
+        row_height = 18  # Set the desired row height
+        # Add QCheckBox to the first column of each column
+        for row in range(self.tableWidget_files_list.rowCount()):
+            # Set the row height
+            self.tableWidget_files_list.setRowHeight(row, row_height)
+            checkbox_item = QTableWidgetItem()
+            checkbox = QCheckBox()
+            checkbox_item.setFlags(checkbox_item.flags() ^ 0x00000010)  # Set to non-editable
+            self.tableWidget_files_list.setItem(row, 0, checkbox_item)
+            # Create a QWidget with a QHBoxLayout
+            widget = QWidget()
+            layout = QHBoxLayout(widget)
+            layout.addWidget(checkbox)
+            layout.setAlignment(QtCore.Qt.AlignCenter)
+            layout.setContentsMargins(0, 0, 0, 0)
+            widget.setLayout(layout)
+            # Set the QWidget as the cellWidget
+            self.tableWidget_files_list.setCellWidget(row, 0, widget)
+            # Set the alignment of the content in column 3
+            column_3_item = self.tableWidget_files_list.item(row, 2)
+            if column_3_item:
+                column_3_item.setTextAlignment(QtCore.Qt.AlignHCenter | QtCore.Qt.AlignVCenter)
+        # Call setitem() at the end of initUi()
+        self.setitem()
+
+    def setitem(self):
+        # Your data as a list of lists (rows and columns)
+        data = [
+            ["File1", "Status1"],
+            ["File2", "Status2"],
+            ["File3", "Status3"],
+            # Add more rows as needed
+        ]
+
+        # Set the number of rows in the table based on the data length
+        self.tableWidget_files_list.setRowCount(len(data))
+
+        # Add data to the table
+        for row, row_data in enumerate(data):
+            for column, column_data in enumerate(row_data):
+                # Create a QTableWidgetItem with the data
+                item = QTableWidgetItem(column_data)
+                # Set the item to be non-editable if needed
+                item.setFlags(item.flags() ^ 0x00000010)
+                # Add the QTableWidgetItem to the table
+                self.tableWidget_files_list.setItem(row, column + 1, item)  # Add 1 to column since column 0 is reserved for checkboxes
 
 class main_windows(QtWidgets.QMainWindow, UI.Ui_Git_code_change_main.Ui_GitDiffExportUI):
     def __init__(self):
@@ -35,6 +93,7 @@ class main_windows(QtWidgets.QMainWindow, UI.Ui_Git_code_change_main.Ui_GitDiffE
     def setup_control(self):
         self.pushButton_repo_browse.clicked.connect(self.repo_browse)
         self.pushButton_output_browse.clicked.connect(self.output_browse)
+        #self.pushButton_build.clicked.connect(self.build)
         self.pushButton_build.clicked.connect(self.open_select_files_windows) # test
         self.SHA1_group.currentIndexChanged.connect(self.change_num_sha1)
         self.actionHow_to_use.triggered.connect(self.open_how_to_use_windows)
@@ -63,7 +122,7 @@ class main_windows(QtWidgets.QMainWindow, UI.Ui_Git_code_change_main.Ui_GitDiffE
         self.output_path_input.setPlainText(output_path)
 
     # Start the process of exporting Git diffs for the specified SHA-1s.
-    def start(self):
+    def build(self):
         repo_path = self.repo_path_input.toPlainText()
         output_path = self.output_path_input.toPlainText()
         sha1_list = [sha1_input.toPlainText() for sha1_input in self.sha1_inputs]
