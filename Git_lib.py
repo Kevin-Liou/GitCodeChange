@@ -1,12 +1,17 @@
 import git, os, re, shutil
 from datetime import datetime
 
+
 def export_diff_files(repo_path, sha1, output_path):
     # Initialize Git repository and commit objects
     repo = git.Repo(repo_path)
     assert not repo.bare
+    # Get current commit
     commit = repo.commit(sha1)
+    # Get parent commit
     parent_commit = commit.parents[0]
+    # Get commit message
+    commit_message = commit.message
 
     # Calculate diff between the commit and its parent
     diff = parent_commit.diff(commit, create_patch=True)
@@ -17,8 +22,9 @@ def export_diff_files(repo_path, sha1, output_path):
     deleted_files = list(diff.iter_change_type("D"))
 
     # Create directories to store modified and original files
-    mod_dir = os.path.join(output_path, sha1, "mod")
-    org_dir = os.path.join(output_path, sha1, "org")
+    output_folder_name = "CodeChange_" + sha1
+    mod_dir = os.path.join(output_path, output_folder_name, "mod")
+    org_dir = os.path.join(output_path, output_folder_name, "org")
     os.makedirs(mod_dir, exist_ok=True)
     os.makedirs(org_dir, exist_ok=True)
 
@@ -62,7 +68,8 @@ def export_diff_files(repo_path, sha1, output_path):
             f.write(old_blob.data_stream.read())
 
     # Create note.txt file and write the file lists
-    write_note_file(os.path.join(output_path, sha1), changed_files, added_files, deleted_files)
+    write_note_file(os.path.join(output_path, output_folder_name), changed_files, added_files, deleted_files, sha1, commit_message)
+
 
 def export_uncommitted_changes(repo_path, output_path):
     # Initialize Git repository
@@ -71,12 +78,7 @@ def export_uncommitted_changes(repo_path, output_path):
 
     current_path = output_path
     timestamp = datetime.now().strftime("%Y%m%d%H%M")
-
-    # Create directories for modified and original files
-    mod_dir = os.path.join(current_path, timestamp, "mod")
-    org_dir = os.path.join(current_path, timestamp, "org")
-    os.makedirs(os.path.join(mod_dir), exist_ok=True)
-    os.makedirs(os.path.join(org_dir), exist_ok=True)
+    output_folder_name = "CodeChange_" + timestamp
 
     # Get head_commit_diff and untracked_files changes
     staged_diff = repo.index.diff(None) + repo.index.diff(repo.head.commit) # Can get status but b_blob is none
@@ -106,6 +108,15 @@ def export_uncommitted_changes(repo_path, output_path):
             elif staged_diff_file.change_type == "R":
                 if staged_diff_file.a_path == head_commit_diff_file.a_path:
                     deleted_files.append(head_commit_diff_file)
+
+    if len(changed_files) == 0 and len(added_files) == 0 and len(deleted_files) == 0:
+        return False
+
+    # Create directories for modified and original files
+    mod_dir = os.path.join(current_path, output_folder_name, "mod")
+    org_dir = os.path.join(current_path, output_folder_name, "org")
+    os.makedirs(os.path.join(mod_dir), exist_ok=True)
+    os.makedirs(os.path.join(org_dir), exist_ok=True)
 
     # Save changed files (new and old versions)
     for diff_file in changed_files:
@@ -149,7 +160,9 @@ def export_uncommitted_changes(repo_path, output_path):
             f.write(old_blob.data_stream.read())
 
     # Create note.txt file and write the file lists
-    write_note_file(os.path.join(output_path, timestamp), changed_files, added_files, deleted_files)
+    write_note_file(os.path.join(output_path, output_folder_name), changed_files, added_files, deleted_files, sha1 = None, commit_message = None)
+    return True
+
 
 # Check if a given string is a valid SHA-1 hash
 def is_valid_sha1(sha1):
@@ -160,9 +173,40 @@ def is_valid_sha1(sha1):
     return True
 
 
+def is_sha1_exist(repo_path, sha1):
+    # Initialize Git repository and commit objects
+    if os.path.isdir(os.path.join(repo_path, ".gitman")):
+        for Gitman_folder in os.listdir(os.path.join(repo_path, ".gitman")):
+            Gitman_folder = os.path.join(repo_path, ".gitman", Gitman_folder)
+            if os.path.isdir(Gitman_folder):
+                print("")
+    try:
+        repo = git.Repo(repo_path)
+        assert not repo.bare
+        commit = repo.commit(sha1)
+        return True
+    except ValueError:
+        return False # end the function since there's nothing we can do without the commit
+    except:
+        return False
+
+
+def is_folder_exist(sha1, output_path):
+    mod_dir = os.path.join(output_path, "CodeChange_" + sha1)
+    org_dir = os.path.join(output_path, "CodeChange_" + sha1)
+    if os.path.isdir(mod_dir) and os.path.isdir(org_dir):
+        return True
+    return False
+
+
 # Add note.txt to the given commit
-def write_note_file(directory, changed_files, added_files, deleted_files):
+def write_note_file(directory, changed_files, added_files, deleted_files, sha1, commit_message):
+    # Create the directory if it doesn't exist
+    os.makedirs(directory, exist_ok=True)
+    # Write the commit message and file lists to note.txt
     with open(os.path.join(directory, "note.txt"), "w") as note_file:
+        if sha1 is not None and commit_message is not None:
+            note_file.write("SHA-1: " + sha1 + "\n\n" + commit_message + "\n")
         note_file.write("Changed files:\n")
         for file in changed_files:
             note_file.write(f"{file.a_path}\n")

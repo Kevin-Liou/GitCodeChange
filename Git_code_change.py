@@ -25,6 +25,7 @@ class select_files_windows(QtWidgets.QDialog, UI.Ui_Git_code_change_select_files
         # self.pushButton_repo_browse.clicked.connect(self.repo_browse)
         pass
 
+    # Set up the tableWidget_files_list
     def initUi(self):
         self.tableWidget_files_list.horizontalHeader().resizeSection(0, 15) # Set column width
         self.tableWidget_files_list.horizontalHeader().resizeSection(1, 546) # Set column width
@@ -81,7 +82,7 @@ class select_files_windows(QtWidgets.QDialog, UI.Ui_Git_code_change_select_files
                 # Add the QTableWidgetItem to the table
                 self.tableWidget_files_list.setItem(row, column + 1, item)  # Add 1 to column since column 0 is reserved for checkboxes
 
-class main_windows(QtWidgets.QMainWindow, UI.Ui_Git_code_change_main.Ui_GitDiffExportUI):
+class main_windows(QtWidgets.QMainWindow, UI.Ui_Git_code_change_main.Ui_MainWindow):
     def __init__(self):
         super().__init__()
         self.setupUi(self)
@@ -93,8 +94,8 @@ class main_windows(QtWidgets.QMainWindow, UI.Ui_Git_code_change_main.Ui_GitDiffE
     def setup_control(self):
         self.pushButton_repo_browse.clicked.connect(self.repo_browse)
         self.pushButton_output_browse.clicked.connect(self.output_browse)
-        #self.pushButton_build.clicked.connect(self.build)
-        self.pushButton_build.clicked.connect(self.open_select_files_windows) # test
+        self.pushButton_build.clicked.connect(self.build)
+        #self.pushButton_build.clicked.connect(self.open_select_files_windows) # test select_files_windows
         self.SHA1_group.currentIndexChanged.connect(self.change_num_sha1)
         self.actionHow_to_use.triggered.connect(self.open_how_to_use_windows)
         self.actionSetting.triggered.connect(self.open_setting_windows)
@@ -108,7 +109,7 @@ class main_windows(QtWidgets.QMainWindow, UI.Ui_Git_code_change_main.Ui_GitDiffE
         if not os.path.exists(os.path.join(repo_path, '.git')):
             QMessageBox.information(self, "Error", "Not a valid Git repository.", QMessageBox.Ok)
             return
-        self.repo_path_input.setPlainText(repo_path)
+        self.repo_path_input.setText(repo_path)
 
     # Show a dialog to select an output directory, then set the selected path as the output path.
     def output_browse(self):
@@ -119,24 +120,41 @@ class main_windows(QtWidgets.QMainWindow, UI.Ui_Git_code_change_main.Ui_GitDiffE
         if not os.path.exists(output_path):
             QMessageBox.information(self, "Error", "This path does not exist.", QMessageBox.Ok)
             return
-        self.output_path_input.setPlainText(output_path)
+        self.output_path_input.setText(output_path)
 
     # Start the process of exporting Git diffs for the specified SHA-1s.
     def build(self):
-        repo_path = self.repo_path_input.toPlainText()
-        output_path = self.output_path_input.toPlainText()
-        sha1_list = [sha1_input.toPlainText() for sha1_input in self.sha1_inputs]
-        # Check if all sha1s are valid
-        invalid_list = [sha1 for sha1 in sha1_list if not Git_lib.is_valid_sha1(sha1)]
-        # If there are any invalid SHA-1s and (the list has more than one element or the first element is not an empty string)
-        if invalid_list and (len(sha1_list) > 1 or (len(sha1_list) == 1 and sha1_list[0] != "")):
-            QMessageBox.warning(self, "Invalid SHA-1", f"The provided SHA-1s '{invalid_list}' are invalid.")
-            return
-        # Call the export_diff_files function with each sha1 in the sha1_list
-        # Create and start a thread for each SHA-1
+        repo_path = self.repo_path_input.text()
+        output_path = self.output_path_input.text()
+        sha1_list = [sha1_input.text() for sha1_input in self.sha1_inputs]
+        # Build uncommitted changes
         if len(sha1_list) == 1 and sha1_list[0] == "":
-            Git_lib.export_uncommitted_changes(repo_path, output_path)
+            status = Git_lib.export_uncommitted_changes(repo_path, output_path)
+            if status == False:
+                QMessageBox.warning(self, "No change", "There are no changes in the repository.")
+                return
+        # Build for SHA-1 changes
         else:
+            # Check if all sha1s are valid
+            invalid_list = [sha1 for sha1 in sha1_list if not Git_lib.is_valid_sha1(sha1)]
+            # If there are any invalid SHA-1s and (the list has more than one element or the first element is not an empty string)
+            if invalid_list:
+                QMessageBox.warning(self, "Invalid SHA-1", f"The provided SHA-1s '{invalid_list}' are invalid.")
+                return
+            # If there are any SHA-1s that are not exist in the repository
+            check_sha1_exist_list = [sha1 for sha1 in sha1_list if not Git_lib.is_sha1_exist(repo_path, sha1)]
+            if check_sha1_exist_list:
+                QMessageBox.warning(self, "Invalid SHA-1", f"The provided SHA-1s '{check_sha1_exist_list}' are not exist in the repository.")
+                return
+            # Check if a folder exists at the output path
+            for sha1 in sha1_list:
+                folder_exist = False
+                folder_exist = Git_lib.is_folder_exist(sha1, output_path)
+                if folder_exist == True:
+                    QMessageBox.warning(self, "Folder Exist", f"The folder '{sha1}' already exist in the output path.")
+                    return
+            # Call the export_diff_files function with each sha1 in the sha1_list
+            # Create and start a thread for each SHA-1
             threads = [threading.Thread(target=Git_lib.export_diff_files, args=(repo_path, sha1, output_path)) for sha1 in sha1_list]
             for thread in threads:
                 thread.start()
@@ -152,7 +170,7 @@ class main_windows(QtWidgets.QMainWindow, UI.Ui_Git_code_change_main.Ui_GitDiffE
         num_sha1_needed = index + 1
         # If more SHA1 inputs are needed, create them and add them to the layout
         while len(self.sha1_inputs) < num_sha1_needed:
-            new_sha1_input = QtWidgets.QPlainTextEdit(self.widget)
+            new_sha1_input = QtWidgets.QLineEdit()
             new_sha1_input.setSizePolicy(self.SHA1_input.sizePolicy())
             self.sha1_inputs.append(new_sha1_input)
             self.horizontalLayout_2.insertWidget(len(self.sha1_inputs), new_sha1_input)
@@ -170,8 +188,8 @@ class main_windows(QtWidgets.QMainWindow, UI.Ui_Git_code_change_main.Ui_GitDiffE
     # Save the last repository path to a configuration file.
     def save_config(self):
         config = {
-            "last_repo_path": self.repo_path_input.toPlainText(),
-            "last_output_path": self.output_path_input.toPlainText()
+            "last_repo_path": self.repo_path_input.text(),
+            "last_output_path": self.output_path_input.text()
         }
         with open("config.json", "w") as f:
             json.dump(config, f)
@@ -183,8 +201,8 @@ class main_windows(QtWidgets.QMainWindow, UI.Ui_Git_code_change_main.Ui_GitDiffE
                 config = json.load(f)
             last_repo_path = config.get("last_repo_path", "")
             last_output_path = config.get("last_output_path", "")
-            self.repo_path_input.setPlainText(last_repo_path)
-            self.output_path_input.setPlainText(last_output_path)
+            self.repo_path_input.setText(last_repo_path)
+            self.output_path_input.setText(last_output_path)
 
     # Open the "How to Use" window.
     def open_how_to_use_windows(self):
