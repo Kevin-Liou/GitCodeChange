@@ -176,10 +176,56 @@ Changed files:
 
 ## 注意事項與已知限制
 
+本工具的主要產出是 **`ORG/` 與 `MOD/` 兩份完整檔案**;`changes.patch` 與
+`commit_message.txt` 是附帶的參考資料。已知問題依此分成三類 —— **只有第一類會讓匯出的
+檔案本身不正確**,其餘兩類不影響 ORG/MOD 的內容。
+
+### ⚠️ 一、會影響 ORG/ 與 MOD/ 檔案內容
+
+這一類要留意,因為匯出的檔案本身就是錯的。
+
+* **smudge filter 失敗**(典型情況:專案用 git-lfs 或 git-crypt,但這台機器沒安裝,或
+  LFS 物件沒下載)。該檔案會退回未轉換的原始內容,可能與其他檔案的換行符不一致。
+  **這種情況會在執行紀錄中以 ⚠ 警告列出檔名**,看到就不要直接使用那個檔案。
+* **submodule(gitlink)** 會被當成一般檔案匯出,內容是該 submodule 的 commit 物件,
+  不是子專案的檔案。多數情況下會匯出失敗並記錄錯誤,但當該 commit 物件剛好存在於外層
+  儲存庫時,會靜默產生一個看似正常的假檔案。
+* **只差大小寫的兩個路徑**,在 Windows 這種不分大小寫的檔案系統上會被合併成同一個檔案,
+  導致其中一個檔案遺失。要確認這次匯出有沒有踩到:
+
+  ```bash
+  git diff --name-only <base> <target> | tr 'A-Z' 'a-z' | sort | uniq -d
+  ```
+
+  有輸出就代表這批變更裡存在大小寫衝突。
+* **git 版本低於 2.40** 時,`GIT_ATTR_SOURCE` 會被忽略,匯出歷史 commit 時會改用目前
+  工作區的 `.gitattributes` 規則。若該檔案的規則在這之間變動過,換行符會是錯的。
+
+### 二、只影響 `changes.patch`(ORG/MOD 仍然正確)
+
+* 二進位檔案照樣會複製完整檔案,但 patch 內只會顯示 `Binary files differ`。**因此只要
+  變更集裡含二進位檔,`changes.patch` 就無法用 `git apply` 套用**(產生 diff 時未帶
+  `--binary`),而且是整份失效 —— 純文字的部分也不會套用。
+* **合併模式若最舊的一筆是儲存庫的第一個 commit**,`changes.patch` 只會包含最新那一筆
+  commit 的差異,與同一包的 ORG/MOD 對不起來。
+* `changes.patch` 在未提交模式下**不包含 untracked 檔案**(`git diff` 的行為)。
+* 沒有任何檔案變更的 commit 會產生 0 byte 的 `changes.patch`,`git apply` 會拒絕它。
+
+### 三、只影響 `commit_message.txt`(ORG/MOD 仍然正確)
+
+清單的分類或排序不夠精確,但檔案本身都有正確匯出。
+
+* **未提交模式不辨識更名**:`git mv` 之後尚未 commit 的檔案會被列為 `[MODIFIED] <新路徑>`,
+  舊路徑不會出現在清單裡 —— 但舊路徑的檔案仍有正常寫進 `ORG/`。已 commit 的更名在
+  單筆/合併模式下能正確辨識。
+* **commit 排序依 committer date**,不是依祖先關係。經過 rebase、cherry-pick、amend 或
+  匯入的歷史,「oldest → newest」的順序與日期範圍可能標錯。
+* git 記錄為 copy 的檔案會被標成 `[ADDED]`,但 patch 裡寫的是 `copy from/copy to`。
+
+### 四、一般操作注意事項
+
 * **覆蓋選項會刪除整個目標資料夾**。雖然有「必須看起來像本工具輸出」的防呆,仍建議輸出到專用資料夾,不要指到桌面或專案根目錄。
 * 不會遞迴進 submodule 或 `.gitman` 子專案,只處理所選儲存庫本身。
-* `changes.patch` 在未提交模式下**不包含 untracked 檔案**(`git diff` 的行為)。
-* 二進位檔案照樣會複製完整檔案,但 patch 內只會顯示 `Binary files differ`。**因此只要變更集裡含二進位檔,`changes.patch` 就無法用 `git apply` 套用**(產生 diff 時未帶 `--binary`)。ORG/MOD 的檔案本身仍然完整正確。
 * 路徑超過 240 字元時會自動加上 `\\?\` 前綴繞過 Windows MAX_PATH 限制。
 * 合併模式匯出的是**頭尾兩個版本的差異**,不是把每筆 commit 的變更逐一疊加。範圍內沒被選到的 commit,其變更同樣會包含在內。
 * 儲存庫很大時,建議把「筆數」調小一點再載入 commit 清單。
@@ -189,16 +235,7 @@ Changed files:
 
 * 匯出的檔案內容會**套用 checkout 時的轉換**(`git cat-file --filters`),所以在 `core.autocrlf=true` 或 `.gitattributes` 設了 `text=auto` 的儲存庫上,拿到的換行符與 `git clone` 後工作區的檔案一致,可以直接覆蓋回去而不會產生整檔差異。
 * 代價是**每個檔案要跑一次 `git` 子行程**,實測約 25 ms/檔。數十個檔案的 commit 無感,500 個檔案的 commit 大約要 25 秒。這是為了換行符正確性刻意付出的成本。
-* `.gitattributes` 會依**被匯出的那個 revision** 解析(透過 `GIT_ATTR_SOURCE`),所以匯出歷史 commit 時不會誤用現在的規則。此環境變數需要 **git 2.40 以上**;更舊的 git 會忽略它,退回用目前工作區的規則。
-* 萬一轉換失敗,會改用未轉換的原始內容,並在執行紀錄中以警告列出該檔案 —— 這種情況下該檔案的換行符可能與工作區不同。
-
-### 其他已知行為
-
-* **未提交模式不辨識更名**:`git mv` 之後尚未 commit 的檔案,會被列為新增與刪除兩筆(或 `MODIFIED`),而不是一筆更名。已 commit 的更名在單筆/合併模式下則能正確辨識。
-* **合併模式若最舊的一筆是儲存庫的第一個 commit**,`changes.patch` 的內容會不正確(此時沒有可比較的父節點)。ORG/MOD 仍為正確的空/滿狀態。
-* submodule(gitlink)會被當成一般檔案匯出,內容是該 submodule 的 commit 物件,不是子專案的檔案。
-* 在 Windows 這種不分大小寫的檔案系統上,只差大小寫的兩個路徑會被合併成同一個檔案。
-* 沒有任何檔案變更的 commit 會產生 0 byte 的 `changes.patch`,`git apply` 會拒絕它。
+* `.gitattributes` 會依**被匯出的那個 revision** 解析(透過 `GIT_ATTR_SOURCE`),所以匯出歷史 commit 時不會誤用現在的規則 —— 包含「同一個 commit 同時改了 `.gitattributes` 和檔案內容」這種 ORG 與 MOD 需要套用不同規則的情況。
 
 ---
 
