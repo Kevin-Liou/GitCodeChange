@@ -33,7 +33,7 @@ from ttkbootstrap.tooltip import ToolTip
 from git import Repo, InvalidGitRepositoryError, NoSuchPathError
 
 APP_NAME = "Git Commit Extractor"
-APP_VERSION = "2.2"
+APP_VERSION = "2.3"
 CONFIG_FILE = os.path.expanduser("~/.git_export_tool_config.json")
 MAX_HISTORY = 12
 
@@ -76,10 +76,52 @@ def ensure_parent(path):
         os.makedirs(long_path(parent), exist_ok=True)
 
 
-def write_blob(dest, blob):
+def write_blob(dest, blob, repo=None, attr_source=None, reporter=None):
+    """Write a blob out the way `git checkout` would.
+
+    blob.data_stream gives the raw object contents. With core.autocrlf=true or a
+    .gitattributes `text=auto`, git stores text normalised to LF and only converts back
+    to CRLF on checkout - so writing the raw stream produces LF files that differ from
+    every file in the user's working tree.
+
+    `git cat-file --filters` runs the same smudge/eol filters checkout does, which keeps
+    ORG/ and MOD/ byte-identical to a real checkout.
+
+    attr_source is the revision whose .gitattributes should govern the conversion.
+    Without it git reads .gitattributes from the CURRENT working tree, so exporting a
+    historical commit made before a .gitattributes change would apply today's rules and
+    silently produce the wrong line endings. GIT_ATTR_SOURCE (git >= 2.40) points the
+    attribute lookup at the right revision; on older git it is ignored and behaviour
+    falls back to today's rules.
+
+    strip_newline_in_stdout=False is required: GitPython otherwise eats the final byte,
+    which on a CRLF file leaves a broken lone \\r at EOF.
+
+    If the filtered read fails for any reason the raw stream is used, and - unlike a
+    silent fallback - the reporter is told, because that output may have the wrong line
+    endings and nothing else would reveal it.
+    """
     ensure_parent(dest)
+    data = None
+    if repo is not None:
+        try:
+            args = ("--filters", blob.hexsha, "--path=" + blob.path)
+            kw = dict(stdout_as_string=False, strip_newline_in_stdout=False)
+            if attr_source:
+                with repo.git.custom_environment(GIT_ATTR_SOURCE=str(attr_source)):
+                    data = repo.git.cat_file(*args, **kw)
+            else:
+                data = repo.git.cat_file(*args, **kw)
+        except Exception as e:
+            data = None
+            if reporter is not None:
+                reporter.log(
+                    f"   ⚠ {blob.path}：無法套用 checkout 轉換({e}),"
+                    f"改用未轉換內容,換行符可能與工作區不同", "warning")
+    if data is None:
+        data = blob.data_stream.read()
     with open(long_path(dest), "wb") as f:
-        f.write(blob.data_stream.read())
+        f.write(data)
 
 
 def copy_file(src, dest):
@@ -190,8 +232,15 @@ def _write_note(path, header_lines, message, entries):
 
 def _write_patch(out_dir, data, reporter):
     try:
+        if not isinstance(data, bytes):
+            data = data.encode("utf-8", "replace")
+        # A patch whose last line has no trailing newline makes `git apply` fail with
+        # "corrupt patch at line N". Callers pass strip_newline_in_stdout=False so this
+        # should already hold; kept as a backstop for any other caller.
+        if data and not data.endswith(b"\n"):
+            data += b"\n"
         with open(long_path(os.path.join(out_dir, "changes.patch")), "wb") as f:
-            f.write(data if isinstance(data, bytes) else data.encode("utf-8", "replace"))
+            f.write(data)
     except Exception as e:
         reporter.log(f"⚠ 無法輸出 changes.patch：{e}", "warning")
 
@@ -218,8 +267,16 @@ def _tree_to_changes(commit):
             for item in commit.tree.traverse() if item.type == "blob"]
 
 
-def _write_changes(out_dir, changes, reporter):
-    """Write every change into ORG/ and MOD/. Returns (entries, failed)."""
+def _write_changes(out_dir, changes, reporter, repo=None,
+                   org_rev=None, mod_rev=None):
+    """Write every change into ORG/ and MOD/. Returns (entries, failed).
+
+    repo is passed through to write_blob so blobs go through the checkout filters
+    (line-ending conversion). Without it the output silently becomes LF-only.
+
+    org_rev / mod_rev name the revisions each side came from, so .gitattributes is read
+    from the right point in history rather than from today's working tree.
+    """
     total = len(changes)
     entries, failed = [], 0
     for idx, (status, display, a_blob, b_blob) in enumerate(changes, 1):
@@ -229,9 +286,11 @@ def _write_changes(out_dir, changes, reporter):
         reporter.progress(idx, total)
         try:
             if a_blob is not None:
-                write_blob(os.path.join(out_dir, "ORG", a_blob.path), a_blob)
+                write_blob(os.path.join(out_dir, "ORG", a_blob.path), a_blob,
+                           repo, org_rev, reporter)
             if b_blob is not None:
-                write_blob(os.path.join(out_dir, "MOD", b_blob.path), b_blob)
+                write_blob(os.path.join(out_dir, "MOD", b_blob.path), b_blob,
+                           repo, mod_rev, reporter)
             entries.append((status, display))
             reporter.log(f"   [{status}] {display}", status.lower())
         except Exception as e:
@@ -338,7 +397,10 @@ def extract_commit(repo, rev, output_base, reporter,
 
     if not changes:
         reporter.log("ℹ 此 commit 沒有檔案變更", "muted")
-    entries, failed = _write_changes(out_dir, changes, reporter)
+    entries, failed = _write_changes(
+        out_dir, changes, reporter, repo,
+        org_rev=(parent.hexsha if parent is not None else None),
+        mod_rev=commit.hexsha)
 
     header = [
         f"Commit:  {commit.hexsha}",
@@ -351,9 +413,13 @@ def extract_commit(repo, rev, output_base, reporter,
     if with_patch:
         try:
             if parent is not None:
-                data = repo.git.diff(parent.hexsha, commit.hexsha, stdout_as_string=False)
+                data = repo.git.diff(parent.hexsha, commit.hexsha,
+                                     stdout_as_string=False,
+                                     strip_newline_in_stdout=False)
             else:
-                data = repo.git.show(commit.hexsha, stdout_as_string=False)
+                data = repo.git.show(commit.hexsha,
+                                     stdout_as_string=False,
+                                     strip_newline_in_stdout=False)
             _write_patch(out_dir, data, reporter)
         except Exception as e:
             reporter.log(f"⚠ 無法產生 diff：{e}", "warning")
@@ -417,7 +483,10 @@ def extract_commit_range(repo, revs, output_base, reporter,
 
     if not changes:
         reporter.log("ℹ 這段範圍的總變更為空(可能互相抵銷了)", "muted")
-    entries, failed = _write_changes(out_dir, changes, reporter)
+    entries, failed = _write_changes(
+        out_dir, changes, reporter, repo,
+        org_rev=(base.hexsha if base is not None else None),
+        mod_rev=newest.hexsha)
 
     ordered = sorted(commits, key=lambda c: c.committed_date)
     header = [
@@ -441,9 +510,13 @@ def extract_commit_range(repo, revs, output_base, reporter,
     if with_patch:
         try:
             if base is not None:
-                data = repo.git.diff(base.hexsha, newest.hexsha, stdout_as_string=False)
+                data = repo.git.diff(base.hexsha, newest.hexsha,
+                                     stdout_as_string=False,
+                                     strip_newline_in_stdout=False)
             else:
-                data = repo.git.show(newest.hexsha, stdout_as_string=False)
+                data = repo.git.show(newest.hexsha,
+                                     stdout_as_string=False,
+                                     strip_newline_in_stdout=False)
             _write_patch(out_dir, data, reporter)
         except Exception as e:
             reporter.log(f"⚠ 無法產生 diff：{e}", "warning")
@@ -501,7 +574,8 @@ def extract_working_tree(repo, output_base, reporter,
         reporter.progress(idx, total)
         try:
             if a_blob is not None:
-                write_blob(os.path.join(out_dir, "ORG", a_blob.path), a_blob)
+                write_blob(os.path.join(out_dir, "ORG", a_blob.path), a_blob,
+                           repo, "HEAD", reporter)
             if disk is not None:
                 copy_file(disk, os.path.join(out_dir, "MOD", path))
             entries.append((status, path))
@@ -520,7 +594,11 @@ def extract_working_tree(repo, output_base, reporter,
 
     if with_patch:
         try:
-            _write_patch(out_dir, repo.git.diff("HEAD", stdout_as_string=False), reporter)
+            _write_patch(out_dir,
+                         repo.git.diff("HEAD",
+                                       stdout_as_string=False,
+                                       strip_newline_in_stdout=False),
+                         reporter)
             reporter.log("ℹ changes.patch 不包含未追蹤(untracked)檔案", "muted")
         except Exception as e:
             reporter.log(f"⚠ 無法產生 diff：{e}", "warning")

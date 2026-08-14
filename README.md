@@ -179,11 +179,63 @@ Changed files:
 * **覆蓋選項會刪除整個目標資料夾**。雖然有「必須看起來像本工具輸出」的防呆,仍建議輸出到專用資料夾,不要指到桌面或專案根目錄。
 * 不會遞迴進 submodule 或 `.gitman` 子專案,只處理所選儲存庫本身。
 * `changes.patch` 在未提交模式下**不包含 untracked 檔案**(`git diff` 的行為)。
-* 二進位檔案照樣會複製完整檔案,但 patch 內只會顯示 `Binary files differ`。
+* 二進位檔案照樣會複製完整檔案,但 patch 內只會顯示 `Binary files differ`。**因此只要變更集裡含二進位檔,`changes.patch` 就無法用 `git apply` 套用**(產生 diff 時未帶 `--binary`)。ORG/MOD 的檔案本身仍然完整正確。
 * 路徑超過 240 字元時會自動加上 `\\?\` 前綴繞過 Windows MAX_PATH 限制。
 * 合併模式匯出的是**頭尾兩個版本的差異**,不是把每筆 commit 的變更逐一疊加。範圍內沒被選到的 commit,其變更同樣會包含在內。
 * 儲存庫很大時,建議把「筆數」調小一點再載入 commit 清單。
 * 選儲存庫時要選到含 `.git` 的那一層,不會往上層目錄自動尋找。
+
+### 換行符與匯出速度
+
+* 匯出的檔案內容會**套用 checkout 時的轉換**(`git cat-file --filters`),所以在 `core.autocrlf=true` 或 `.gitattributes` 設了 `text=auto` 的儲存庫上,拿到的換行符與 `git clone` 後工作區的檔案一致,可以直接覆蓋回去而不會產生整檔差異。
+* 代價是**每個檔案要跑一次 `git` 子行程**,實測約 25 ms/檔。數十個檔案的 commit 無感,500 個檔案的 commit 大約要 25 秒。這是為了換行符正確性刻意付出的成本。
+* `.gitattributes` 會依**被匯出的那個 revision** 解析(透過 `GIT_ATTR_SOURCE`),所以匯出歷史 commit 時不會誤用現在的規則。此環境變數需要 **git 2.40 以上**;更舊的 git 會忽略它,退回用目前工作區的規則。
+* 萬一轉換失敗,會改用未轉換的原始內容,並在執行紀錄中以警告列出該檔案 —— 這種情況下該檔案的換行符可能與工作區不同。
+
+### 其他已知行為
+
+* **未提交模式不辨識更名**:`git mv` 之後尚未 commit 的檔案,會被列為新增與刪除兩筆(或 `MODIFIED`),而不是一筆更名。已 commit 的更名在單筆/合併模式下則能正確辨識。
+* **合併模式若最舊的一筆是儲存庫的第一個 commit**,`changes.patch` 的內容會不正確(此時沒有可比較的父節點)。ORG/MOD 仍為正確的空/滿狀態。
+* submodule(gitlink)會被當成一般檔案匯出,內容是該 submodule 的 commit 物件,不是子專案的檔案。
+* 在 Windows 這種不分大小寫的檔案系統上,只差大小寫的兩個路徑會被合併成同一個檔案。
+* 沒有任何檔案變更的 commit 會產生 0 byte 的 `changes.patch`,`git apply` 會拒絕它。
+
+---
+
+## 版本紀錄
+
+### v2.3
+
+修正兩個會讓匯出結果不能直接使用的問題。**建議從舊版升上來**。
+
+**1. 匯出的檔案換行符是錯的**
+
+舊版直接讀 git 物件的原始位元組。在 `core.autocrlf=true` 或 `.gitattributes` 有 `text=auto` 的儲存庫上,git 儲存的是正規化成 LF 的內容,要到 checkout 時才轉回 CRLF —— 所以匯出的每個文字檔都是 LF,與工作區的 CRLF 不同。把 `MOD/` 覆蓋回專案,會看到**每一個檔案整檔都是差異**。
+
+未提交模式更嚴重:`ORG/` 走 git 物件(LF)、`MOD/` 直接複製磁碟檔(CRLF),**兩邊格式不同**,拿去 Beyond Compare 對照時每個檔案都會滿江紅,等於對照功能完全失效。
+
+v2.3 改用 `git cat-file --filters`,輸出與真實 checkout 一致;並透過 `GIT_ATTR_SOURCE` 讓 `.gitattributes` 依被匯出的 revision 解析,避免匯出歷史 commit 時誤用現在的規則。
+
+**2. `changes.patch` 無法用 `git apply` 套用**
+
+GitPython 取 `git diff` 輸出時預設會吃掉最後一個換行位元組,導致 patch 少了結尾換行,`git apply` 直接報:
+
+```
+error: corrupt patch at line N
+```
+
+在 CRLF 檔案上更糟 —— 被砍掉的是 `\r\n` 的 `\n`,結尾留下一個孤立的 `\r`。
+
+v2.3 在所有取 diff 的呼叫點加上 `strip_newline_in_stdout=False`,並在寫檔時再補一道保險。
+
+**其他**
+
+* 轉換失敗時不再靜默改用未轉換內容,會在執行紀錄中發出警告。
+* 已知限制補充說明(二進位檔的 patch、更名辨識、submodule、匯出速度等),詳見「注意事項與已知限制」。
+
+### v2.2 以前
+
+見 commit 紀錄。
 
 ---
 
