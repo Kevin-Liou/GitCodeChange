@@ -14,14 +14,26 @@
 | --- | --- |
 | 作業系統 | Windows(macOS / Linux 也可執行,開啟資料夾的行為會自動切換) |
 | Python | 3.8 以上(開發環境為 3.11) |
-| 套件 | `ttkbootstrap`、`GitPython` |
-| 其他 | 系統需裝有 `git` 指令(產生 `changes.patch` 時會用到) |
+| 套件 | `ttkbootstrap` **1.x**(不可用 2.x)、`GitPython` |
+| 其他 | 系統需裝有 `git` 指令(GitPython 與 `changes.patch` 都會用到) |
 
 安裝套件:
 
 ```powershell
-pip install ttkbootstrap GitPython
+py -m pip install -r requirements.txt
 ```
+
+> **ttkbootstrap 必須是 1.x。** 直接 `pip install ttkbootstrap` 會裝到 2.x,
+> 開啟時會出現 `ModuleNotFoundError: No module named 'ttkbootstrap.tooltip'`。
+> 原因是 2.0 把 `ToolTip` 搬到 `ttkbootstrap.widgets`,而且 `darkly`、`cyborg`
+> 這些主題名稱預設不再註冊。若已經裝到 2.x,執行:
+>
+> ```powershell
+> py -m pip install "ttkbootstrap>=1.5,<2.0"
+> ```
+>
+> 從 v2.4 起,套件缺失或版本不符時會跳出說明視窗並附上修正指令,
+> 不會再直接丟出 traceback。
 
 ## 執行
 
@@ -46,7 +58,18 @@ python git_diff_export.py
 | --- | --- |
 | **Commit 清單** | 直接從清單挑 commit。可切換分支、調整載入筆數、用關鍵字搜尋(SHA / 作者 / 標題),按住 `Ctrl` / `Shift` 可複選多筆一次匯出;連按兩下可在執行紀錄看到完整 commit 訊息。 |
 | **手動輸入 SHA** | 貼上一或多筆 SHA、分支名或 tag,以空白、逗號或換行分隔。 |
-| **未提交的變更** | 匯出工作區目前尚未 commit 的內容(含已 `git add` 的部分),會先列出受影響的檔案清單。 |
+| **未提交的變更** | 匯出工作區目前尚未 commit 的內容(含已 `git add` 的部分)。清單可**複選要匯出哪些檔案**,見下方說明。 |
+
+**未提交的變更 — 挑選檔案(v2.4 起)**
+
+清單以表格呈現(狀態 / 檔案路徑),可用 `Ctrl` / `Shift` 複選,或用「全選」「全不選」按鈕:
+
+* **有選取** → 只匯出選中的檔案。適合工作區混著一堆 `.cache`、暫存檔,只想撈其中幾支的情況。
+* **未選取** → 維持舊行為,匯出全部(此時才受「未提交模式包含未追蹤檔案」選項影響)。
+* 選取的檔案**優先於**「未提交模式包含未追蹤檔案」選項:即使該選項是關的,只要在清單裡選了 untracked 檔案就會匯出。
+* 按「重新檢查」重讀清單時,仍存在的選取項目會被保留。
+* `changes.patch` 會**跟著只包含選取的檔案**,與 `ORG` / `MOD` 一致;若選到的全是 untracked 檔案,則不產生 patch(untracked 本來就不在 diff 裡)。
+* `commit_message.txt` 會多一行 `Scope: selected files only (N picked)` 標示這是部分匯出。
 
 ### ③ 輸出資料夾
 
@@ -61,7 +84,7 @@ python git_diff_export.py
 | 覆蓋已存在的輸出資料夾 | 關閉時遇到同名資料夾會略過。開啟時只會覆蓋「本工具產生的」資料夾(必須含 `ORG` / `MOD` / `commit_message.txt`),否則一樣略過,避免誤刪。 | 關 |
 | 同時輸出 changes.patch | 以 `git diff` 產生 unified diff 檔。 | 開 |
 | 資料夾名稱加上短 SHA | 資料夾後面補上 8 碼 SHA,避免同日期、同標題的 commit 互相衝突。 | 關 |
-| 未提交模式包含未追蹤檔案 | 把 untracked 檔案也複製到 `MOD`。 | 開 |
+| 未提交模式包含未追蹤檔案 | 把 untracked 檔案也複製到 `MOD`。**只在未提交清單「沒有選取任何檔案」時生效**;有選取時以選取結果為準。 | 開 |
 | 完成後自動開啟輸出資料夾 | 匯出結束自動開啟檔案總管。 | 關 |
 
 ### ⑤ 選多筆 commit 時
@@ -241,6 +264,24 @@ Changed files:
 
 ## 版本紀錄
 
+### v2.4
+
+**1. 未提交的變更可以挑檔案匯出**
+
+舊版的「未提交的變更」分頁只是一份唯讀清單,按下匯出就是整包全出。工作區裡混著 `.cache`、暫存檔、產生物時,匯出的資料夾會被塞滿不相干的檔案。
+
+v2.4 把清單換成可複選的表格,只匯出選中的檔案;沒有選任何檔案時維持舊行為(全部匯出)。`changes.patch` 與 `commit_message.txt` 都會跟著只反映選取範圍。
+
+**2. 套件缺失/版本不符會有明確提示**
+
+`pip install ttkbootstrap` 現在會裝到 2.x,而 2.0 把 `ToolTip` 搬到 `ttkbootstrap.widgets`,舊版程式直接噴:
+
+```
+ModuleNotFoundError: No module named 'ttkbootstrap.tooltip'
+```
+
+v2.4 在匯入階段攔下來,改用對話框說明是版本問題並附上修正指令。同時涵蓋「ttkbootstrap 沒安裝」「GitPython 沒安裝」「系統找不到 `git.exe`」三種情況。另附 `requirements.txt` 鎖定 `ttkbootstrap>=1.5,<2.0`。
+
 ### v2.3
 
 修正兩個會讓匯出結果不能直接使用的問題。**建議從舊版升上來**。
@@ -281,6 +322,7 @@ v2.3 在所有取 diff 的呼叫點加上 `strip_newline_in_stdout=False`,並在
 | 檔案 | 說明 |
 | --- | --- |
 | `git_diff_export.py` | 全部程式碼(核心 + GUI),單檔即可執行 |
+| `requirements.txt` | 套件版本需求(`ttkbootstrap` 鎖在 1.x) |
 | `README.md` | 本說明文件 |
 | `.gitignore` | 忽略清單 |
 
@@ -288,7 +330,8 @@ v2.3 在所有取 diff 的呼叫點加上 `strip_newline_in_stdout=False`,並在
 
 ```python
 from git import Repo
-from git_diff_export import Reporter, extract_commit, extract_commit_range
+from git_diff_export import (Reporter, extract_commit, extract_commit_range,
+                            extract_working_tree)
 
 repo = Repo(r"D:\Code\MyProject")
 
@@ -297,6 +340,10 @@ extract_commit(repo, "HEAD", r"D:\out", Reporter(), name_with_sha=True)
 
 # 多筆合併成一包
 extract_commit_range(repo, ["HEAD", "HEAD~1", "HEAD~2"], r"D:\out", Reporter())
+
+# 未提交的變更,只挑指定檔案(selected_paths=None 代表全部)
+extract_working_tree(repo, r"D:\out", Reporter(),
+                     selected_paths=["src/main.c", "src/main.h"])
 ```
 
 > 舊版以 PyQt5 撰寫的 `Git_code_change.py` / `Git_lib.py` / `UI/` 已移除,需要時可從 git 歷史(commit `b82cdb1` 以前)取回。

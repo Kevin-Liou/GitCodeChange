@@ -1,0 +1,4 @@
+# ttkbootstrap 2.0 moved ToolTip to ttkbootstrap.widgets and no longer registers
+# the pre-2.0 theme names (darkly, cyborg, ...) by default, so stay on the 1.x line.
+ttkbootstrap>=1.5,<2.0
+GitPython>=3.1

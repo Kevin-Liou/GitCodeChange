@@ -26,14 +26,86 @@ import tkinter.font as tkfont
 from datetime import datetime
 from tkinter import filedialog
 
-import ttkbootstrap as ttk
-from ttkbootstrap.constants import *
-from ttkbootstrap.dialogs import Messagebox
-from ttkbootstrap.tooltip import ToolTip
-from git import Repo, InvalidGitRepositoryError, NoSuchPathError
+
+# --------------------------------------------------------------------------
+# Third-party dependencies
+#
+# The UI is pinned to the ttkbootstrap 1.x line: 2.0 moved ToolTip to
+# ttkbootstrap.widgets and stopped registering the pre-2.0 theme names
+# (darkly, cyborg, ...) unless install_legacy_themes() is called. A plain
+# `pip install ttkbootstrap` now pulls 2.x, so tell the user how to fix it
+# instead of dumping an ImportError traceback.
+# --------------------------------------------------------------------------
+TTKBOOTSTRAP_INSTALL = 'py -m pip install "ttkbootstrap>=1.5,<2.0"'
+GITPYTHON_INSTALL = "py -m pip install GitPython"
+
+
+def _installed_version(dist):
+    try:
+        from importlib.metadata import version
+        return version(dist)
+    except Exception:
+        return None
+
+
+def _dependency_error(title, message):
+    """Report a missing/incompatible dependency, then exit."""
+    sys.stderr.write(f"\n{title}\n{message}\n")
+    try:
+        from tkinter import messagebox
+        root = tk.Tk()
+        root.withdraw()
+        messagebox.showerror(title, message)
+        root.destroy()
+    except Exception:
+        pass
+    raise SystemExit(1)
+
+
+try:
+    import ttkbootstrap as ttk
+    from ttkbootstrap.constants import *
+    from ttkbootstrap.dialogs import Messagebox
+    from ttkbootstrap.tooltip import ToolTip
+except ImportError as exc:
+    # A missing top-level package and a missing submodule mean different things:
+    # the first is "not installed", the second is "installed but wrong version".
+    if getattr(exc, "name", "") == "ttkbootstrap":
+        _title = "缺少 ttkbootstrap"
+        _detail = "找不到 ttkbootstrap 套件。"
+    else:
+        _found = _installed_version("ttkbootstrap") or "未知版本"
+        _title = "ttkbootstrap 版本不符"
+        _detail = (f"目前安裝的是 ttkbootstrap {_found}，本工具需要 1.x。\n"
+                   "ttkbootstrap 2.0 之後 ToolTip 換了位置，\n"
+                   "darkly 等主題名稱預設也不再註冊。")
+    _dependency_error(
+        _title,
+        f"{_detail}\n\n請執行以下指令後再開啟本工具：\n\n"
+        f"    {TTKBOOTSTRAP_INSTALL}\n\n"
+        f"(原始錯誤：{exc})")
+
+try:
+    from git import Repo, InvalidGitRepositoryError, NoSuchPathError
+except ImportError as exc:
+    # GitPython raises ImportError both when it is not installed and when it is
+    # installed but git.exe is not on PATH; its refresh error names the executable.
+    _msg = str(exc).lower()
+    if "git executable" in _msg or "git_python_refresh" in _msg:
+        _dependency_error(
+            "找不到 git 執行檔",
+            "GitPython 已安裝，但系統找不到 git 執行檔。\n\n"
+            "請安裝 Git for Windows，並確認 git.exe 在 PATH 中\n"
+            "(可在 PowerShell 執行 git --version 驗證)。\n\n"
+            f"(原始錯誤：{exc})")
+    _dependency_error(
+        "缺少 GitPython",
+        "找不到 GitPython 套件。\n\n請執行以下指令後再開啟本工具：\n\n"
+        f"    {GITPYTHON_INSTALL}\n\n"
+        f"(原始錯誤：{exc})")
 
 APP_NAME = "Git Commit Extractor"
-APP_VERSION = "2.3"
+APP_VERSION = "2.4"
 CONFIG_FILE = os.path.expanduser("~/.git_export_tool_config.json")
 MAX_HISTORY = 12
 
@@ -228,6 +300,34 @@ def _write_note(path, header_lines, message, entries):
         f.write("\nChanged files:\n")
         for status, item in entries:
             f.write(f"  [{status}] {item}\n")
+
+
+def _diff_paths(repo, rev, paths, limit=24000):
+    """`git diff <rev> -- <paths>` as bytes, split into chunks.
+
+    Selecting hundreds of files would otherwise blow past the Windows command-line
+    length limit. Per-file diffs are self-contained, so concatenating the chunks
+    yields a patch `git apply` still accepts.
+    """
+    out = b""
+    chunk, size = [], 0
+    for path in paths:
+        if chunk and size + len(path) + 1 > limit:
+            out += _diff_chunk(repo, rev, chunk)
+            chunk, size = [], 0
+        chunk.append(path)
+        size += len(path) + 1
+    if chunk:
+        out += _diff_chunk(repo, rev, chunk)
+    return out
+
+
+def _diff_chunk(repo, rev, paths):
+    data = repo.git.diff(rev, "--", *paths, stdout_as_string=False,
+                         strip_newline_in_stdout=False)
+    if data and not data.endswith(b"\n"):
+        data += b"\n"
+    return data
 
 
 def _write_patch(out_dir, data, reporter):
@@ -528,13 +628,20 @@ def extract_commit_range(repo, revs, output_base, reporter,
 
 
 def extract_working_tree(repo, output_base, reporter,
-                         overwrite=False, with_patch=True, include_untracked=True):
-    """Export uncommitted changes (working tree + index) against HEAD."""
+                         overwrite=False, with_patch=True, include_untracked=True,
+                         selected_paths=None):
+    """Export uncommitted changes (working tree + index) against HEAD.
+
+    selected_paths limits the export to those repo-relative paths; None exports
+    everything that differs from HEAD.
+    """
     work_dir = repo.working_tree_dir
     folder = datetime.now().strftime("%Y-%m-%d_%H%M") + "_uncommitted"
     out_dir = os.path.join(output_base, folder)
 
-    reporter.log("▶ 工作區未提交的變更", "head")
+    picked = set(selected_paths) if selected_paths else None
+    reporter.log("▶ 工作區未提交的變更"
+                 f"{f'(僅選取的 {len(picked)} 個檔案)' if picked else ''}", "head")
     try:
         head = repo.head.commit
     except Exception as e:
@@ -553,7 +660,9 @@ def extract_working_tree(repo, output_base, reporter,
         else:
             changes.append(("MODIFIED", path, d.a_blob, disk))
 
-    if include_untracked:
+    # An explicit selection overrides the untracked toggle: whatever the user
+    # ticked in the list is what gets exported.
+    if include_untracked or picked:
         for path in repo.untracked_files:
             disk = os.path.join(work_dir, path)
             if os.path.isfile(disk):
@@ -562,6 +671,11 @@ def extract_working_tree(repo, output_base, reporter,
     if not changes:
         reporter.log("ℹ 工作區沒有任何未提交的變更", "muted")
         return None
+    if picked is not None:
+        changes = [c for c in changes if c[1] in picked]
+        if not changes:
+            reporter.log("ℹ 選取的檔案都不在目前的未提交變更中,請按「重新檢查」", "warning")
+            return None
     if not _prepare_output_dir(out_dir, reporter, overwrite):
         return None
 
@@ -590,16 +704,25 @@ def extract_working_tree(repo, output_base, reporter,
         f"Base:    {head.hexsha}",
         f"Date:    {datetime.now().isoformat(timespec='seconds')}",
     ]
+    if picked is not None:
+        header.append(f"Scope:   selected files only ({len(changes)} picked)")
     _write_note(os.path.join(out_dir, "commit_message.txt"), header, None, entries)
 
     if with_patch:
+        # Scope the diff to the exported files so the patch matches ORG/MOD.
+        tracked = [p for status, p in entries if status != "UNTRACKED"]
         try:
-            _write_patch(out_dir,
-                         repo.git.diff("HEAD",
-                                       stdout_as_string=False,
-                                       strip_newline_in_stdout=False),
-                         reporter)
-            reporter.log("ℹ changes.patch 不包含未追蹤(untracked)檔案", "muted")
+            if picked is None:
+                data = repo.git.diff("HEAD", stdout_as_string=False,
+                                     strip_newline_in_stdout=False)
+            elif tracked:
+                data = _diff_paths(repo, "HEAD", tracked)
+            else:
+                data = None
+                reporter.log("ℹ 選取的都是未追蹤檔案,未產生 changes.patch", "muted")
+            if data is not None:
+                _write_patch(out_dir, data, reporter)
+                reporter.log("ℹ changes.patch 不包含未追蹤(untracked)檔案", "muted")
         except Exception as e:
             reporter.log(f"⚠ 無法產生 diff：{e}", "warning")
 
@@ -864,21 +987,40 @@ class GitExportApp(ttk.Window):
         bar.columnconfigure(0, weight=1)
         ttk.Label(bar, text="直接匯出工作區中尚未 commit 的變更(含已 staged 的內容)",
                   style="Muted.TLabel").grid(row=0, column=0, sticky=W)
+        ttk.Button(bar, text="全選", bootstyle=(LINK, INFO),
+                   command=self._dirty_select_all).grid(row=0, column=1)
+        ttk.Button(bar, text="全不選", bootstyle=(LINK, INFO),
+                   command=self._dirty_select_none).grid(row=0, column=2)
         ttk.Button(bar, text="重新檢查", bootstyle=(OUTLINE, INFO),
-                   command=self._refresh_dirty).grid(row=0, column=1)
+                   command=self._refresh_dirty).grid(row=0, column=3, padx=(8, 0))
 
         wrap = ttk.Frame(tab)
         wrap.grid(row=1, column=0, sticky=NSEW)
         wrap.rowconfigure(0, weight=1)
         wrap.columnconfigure(0, weight=1)
 
-        self.dirty_text = tk.Text(wrap, wrap="none", relief=FLAT, state=DISABLED,
-                                  font=(self.mono_font, 10), padx=10, pady=8)
-        self.dirty_text.grid(row=0, column=0, sticky=NSEW)
-        dbar = ttk.Scrollbar(wrap, orient=VERTICAL, command=self.dirty_text.yview,
+        self.dirty_tree = ttk.Treeview(wrap, columns=("status", "path"),
+                                       show="headings", height=10,
+                                       selectmode=EXTENDED, bootstyle=PRIMARY)
+        for col, title, width, stretch in (("status", "狀態", 110, False),
+                                           ("path", "檔案路徑", 660, True)):
+            self.dirty_tree.heading(col, text=title, anchor=W)
+            self.dirty_tree.column(col, width=width, anchor=W, stretch=stretch)
+        self.dirty_tree.grid(row=0, column=0, sticky=NSEW)
+        self.dirty_tree.bind("<<TreeviewSelect>>",
+                             lambda e: self._update_dirty_hint())
+
+        dbar = ttk.Scrollbar(wrap, orient=VERTICAL, command=self.dirty_tree.yview,
                              bootstyle=ROUND)
         dbar.grid(row=0, column=1, sticky=NS)
-        self.dirty_text.configure(yscrollcommand=dbar.set)
+        hbar = ttk.Scrollbar(wrap, orient=HORIZONTAL, command=self.dirty_tree.xview,
+                             bootstyle=ROUND)
+        hbar.grid(row=1, column=0, sticky=EW)
+        self.dirty_tree.configure(yscrollcommand=dbar.set, xscrollcommand=hbar.set)
+
+        self.dirty_hint = ttk.Label(tab, text="", style="Muted.TLabel")
+        self.dirty_hint.grid(row=2, column=0, sticky=W, pady=(8, 0))
+        self._update_dirty_hint()
         return tab
 
     def _build_side_column(self, master):
@@ -1004,7 +1146,7 @@ class GitExportApp(ttk.Window):
     # -- appearance --------------------------------------------------------
     def _apply_palette(self):
         c = self.style.colors
-        for widget in (self.log_text, self.sha_text, self.dirty_text):
+        for widget in (self.log_text, self.sha_text):
             widget.configure(background=c.inputbg, foreground=c.inputfg,
                              insertbackground=c.inputfg,
                              selectbackground=c.selectbg,
@@ -1204,7 +1346,7 @@ class GitExportApp(ttk.Window):
         path = self.repo_var.get().strip()
 
         def work():
-            lines = []
+            rows, err = [], None
             try:
                 repo = Repo(path)
                 head = repo.head.commit
@@ -1212,20 +1354,57 @@ class GitExportApp(ttk.Window):
                     p = d.b_path or d.a_path
                     disk = os.path.join(repo.working_tree_dir, p)
                     if not os.path.exists(disk):
-                        lines.append(f"[DELETED]   {d.a_path}")
+                        rows.append(("DELETED", d.a_path))
                     elif d.a_blob is None:
-                        lines.append(f"[ADDED]     {p}")
+                        rows.append(("ADDED", p))
                     else:
-                        lines.append(f"[MODIFIED]  {p}")
+                        rows.append(("MODIFIED", p))
                 for p in repo.untracked_files:
-                    lines.append(f"[UNTRACKED] {p}")
-                text = "\n".join(lines) if lines else "工作區沒有未提交的變更。"
-                text = f"共 {len(lines)} 個檔案\n\n" + text if lines else text
+                    rows.append(("UNTRACKED", p))
             except Exception as e:
-                text = f"無法讀取工作區狀態：{e}"
-            self.queue.put(("dirty", text))
+                err = str(e)
+            self.queue.put(("dirty", rows, err))
 
         threading.Thread(target=work, daemon=True).start()
+
+    def _set_dirty_rows(self, rows, err):
+        """Refill the uncommitted-changes list, keeping whatever is still selected."""
+        keep = set(self.dirty_tree.selection())
+        self.dirty_tree.delete(*self.dirty_tree.get_children())
+        if err:
+            self._append_log(f"✖ 無法讀取工作區狀態：{err}", "error")
+            self._update_dirty_hint()
+            return
+        for status, path in rows:
+            self.dirty_tree.insert("", END, iid=path, values=(status, path))
+        restore = [p for _s, p in rows if p in keep]
+        if restore:
+            self.dirty_tree.selection_set(restore)
+        self._update_dirty_hint()
+
+    def _dirty_select_all(self):
+        children = self.dirty_tree.get_children()
+        if children:
+            self.dirty_tree.selection_set(children)
+
+    def _dirty_select_none(self):
+        self.dirty_tree.selection_set(())
+
+    def _update_dirty_hint(self):
+        total = len(self.dirty_tree.get_children())
+        picked = len(self.dirty_tree.selection())
+        if not total:
+            text = "工作區沒有未提交的變更。"
+        elif picked:
+            text = f"共 {total} 個檔案 · 已選取 {picked} 個 · 只會匯出選取的檔案"
+        else:
+            text = (f"共 {total} 個檔案 · 未選取 · 可用 Ctrl / Shift 複選;"
+                    "未選取時會匯出全部")
+        self.dirty_hint.configure(text=text)
+
+    def _dirty_selection(self):
+        """Selected repo-relative paths, or None when nothing is selected."""
+        return list(self.dirty_tree.selection()) or None
 
     # -- export ------------------------------------------------------------
     def _collect_targets(self):
@@ -1284,6 +1463,7 @@ class GitExportApp(ttk.Window):
             "with_patch": self.opt_patch.get(),
             "name_with_sha": self.opt_sha_suffix.get(),
             "include_untracked": self.opt_untracked.get(),
+            "selected_paths": self._dirty_selection() if mode == "worktree" else None,
         }
         self.cancel_event.clear()
         self._set_running(True)
@@ -1348,7 +1528,8 @@ class GitExportApp(ttk.Window):
                             repo, out_path, reporter,
                             overwrite=options["overwrite"],
                             with_patch=options["with_patch"],
-                            include_untracked=options["include_untracked"])
+                            include_untracked=options["include_untracked"],
+                            selected_paths=options["selected_paths"])
                     else:
                         stats = extract_commit(
                             repo, target, out_path, reporter,
@@ -1389,7 +1570,7 @@ class GitExportApp(ttk.Window):
                 elif kind == "commits":
                     self._on_commits_loaded(msg[1], msg[2])
                 elif kind == "dirty":
-                    self._set_dirty_text(msg[1])
+                    self._set_dirty_rows(msg[1], msg[2])
                 elif kind == "done":
                     self._on_done(msg[1], msg[2])
         except queue.Empty:
@@ -1404,12 +1585,6 @@ class GitExportApp(ttk.Window):
         self.commits = rows
         self._fill_tree(rows)
         self.status_var.set(f"已載入 {len(rows)} 筆 commit")
-
-    def _set_dirty_text(self, text):
-        self.dirty_text.configure(state=NORMAL)
-        self.dirty_text.delete("1.0", END)
-        self.dirty_text.insert("1.0", text)
-        self.dirty_text.configure(state=DISABLED)
 
     def _on_done(self, results, cancelled):
         self._set_running(False)
